@@ -1,0 +1,18 @@
+enclave {
+    include "sgx_report.h"
+    include "sgx_trts.h"
+    include "att.h"
+
+    trusted {
+        public int ecall_init_enclave(
+            [user_check] secret_t * secret);
+
+        public int ecall_create_report(
+            [user_check] sgx_target_info_t * qe_info, // IN
+            [user_check] sgx_report_t * report, // OUT
+            [user_check] att_msg1_t * p_msg1, // OUT
+            [user_check] uint8_t * pubkey, // OUT
+            [user_check] int * p_len); // OUT
+    };
+
+};
