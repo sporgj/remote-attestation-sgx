@@ -12,6 +12,7 @@
 #define BUF_SIZE 1024
 
 static mbedtls_net_context _ssock, *ssock = &_ssock;
+static sgx_enclave_id_t g_eid = 0;
 
 static int handler(mbedtls_net_context *conn) {
     int ret = -1, nbytes, len;
@@ -21,18 +22,23 @@ static int handler(mbedtls_net_context *conn) {
     att_hdr_t _send_hdr = {0}, _recv_hdr = {0}, *send_hdr = &_send_hdr,
               *recv_hdr = &_recv_hdr;
 
-    log_info("Hello client_fd = %d", conn->fd);
+    log_info("Hello client(fd = %d)", conn->fd);
 
 repeat:
     /* receive the request */
     ret =
         mbedtls_net_recv(conn, (void *)recv_hdr, (nbytes = sizeof(att_hdr_t)));
     if (ret != nbytes) {
-        log_error("mbedtls_net_recv() tried=%d, actual=%d", nbytes, ret);
+        if (ret) { 
+            log_error("mbedtls_net_recv() tried=%d, actual=%d", nbytes, ret);
+        } else {
+            log_info("client(fd = %d) left :(", conn->fd);
+        }
+
         goto out;
     }
 
-    fprintf(stderr, "wow (%d)", (int)(recv_hdr->tlen));
+    // fprintf(stderr, "wow (%d)", (int)(recv_hdr->tlen));
 
     /* allocate the buffer */
     len = recv_hdr->tlen;
@@ -41,7 +47,6 @@ repeat:
         goto out;
     }
 
-    fprintf(stderr, "wow (%d)", (int)(recv_hdr->tlen));
     /* tell him we got it */
     ret = mbedtls_net_send(conn, (uint8_t *)&ack, (nbytes = sizeof(att_ack_t)));
     if (ret != nbytes) {
@@ -59,10 +64,11 @@ repeat:
     }
 
     /* process it now */
-    ret = process_message(recv_hdr, recv_payload, send_hdr, &send_payload);
+    ret = process_message(g_eid, recv_hdr, recv_payload, send_hdr, &send_payload);
 
     att_type_t tp = send_hdr->type;
-    log_debug("responding %s (len=%d)", att_type_2_str(tp), len);
+    len = send_hdr->tlen;
+    log_debug("Responding %s (len=%d)", att_type_2_str(tp), len);
     ret =
         mbedtls_net_send(conn, (void *)send_hdr, (nbytes = sizeof(att_hdr_t)));
     if (ret != nbytes) {
@@ -80,6 +86,14 @@ repeat:
     if (ack != ATT_ACK_OK) {
         log_error("att_ack FAIL %#x != OK:%#x", ack, ATT_ACK_OK);
         goto out;
+    }
+
+    if (len) {
+        ret = mbedtls_net_send(conn, (void *)send_payload, (nbytes = len));
+        if (ret != nbytes) {
+            log_error("mbedtls_net_send() tried=%d, actual=%d", nbytes, ret);
+            goto out;
+        }
     }
 
     /* free the payload */
@@ -149,6 +163,10 @@ int main() {
     int ret = -1;
 
     if (server_init()) {
+        return -1;
+    }
+
+    if (init_enclave(&g_eid, false)) {
         return -1;
     }
 

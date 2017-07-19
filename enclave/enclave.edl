@@ -13,6 +13,11 @@ enclave {
             [user_check] att_msg1_t * p_msg1, // OUT
             [user_check] uint8_t * pubkey, // OUT
             [user_check] int * p_len); // OUT
+
+        public int ecall_generate_m2(
+            [in] uint8_t *pubkey, // IN
+            size_t pubkey_len, // IN
+            [user_check] att_msg2_t *p_msg2); // OUT
     };
 
 };

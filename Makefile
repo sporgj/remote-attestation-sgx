@@ -2,7 +2,7 @@ include sgx_defs.mk
 
 CC := gcc
 
-OBJS := enclave_u.o network.o att.o $(OBJS)
+OBJS := enclave_u.o network.o att.o ias_ra.o $(OBJS)
 
 INCLUDES = -I$(SGX_SDK)/include
 LIBS := -L$(SGX_LIBRARY_PATH) -l$(Urts_Library_Name) -lpthread -Wl,-rpath=$(CURDIR) -lmbedtls

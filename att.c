@@ -10,10 +10,10 @@
 
 #include "att.h"
 #include "enclave_u.h"
+#include "ias_ra.h"
 #include "log.h"
 
 #define ENCLAVE_PATH "./enclave/enclave.signed.so"
-static sgx_enclave_id_t g_eid = 0;
 
 void hexdump(uint8_t *data, uint32_t size) {
     char ascii[17];
@@ -81,7 +81,7 @@ int pubkey_len = sizeof(pubkey);
 int generate_msg1(sgx_enclave_id_t eid, att_msg1_t **pp_msg1, int *tlen) {
     int ret = -1, len;
     uint32_t quote_size;
-    uint8_t * pubkey_buf;
+    uint8_t *pubkey_buf;
     att_msg1_t msg1, *message1;
     sgx_target_info_t qe_info = {0};
     sgx_epid_group_id_t p_gid = {0};
@@ -135,24 +135,62 @@ out:
 }
 
 /*** SERVER STUFF *****/
-int process_msg1(uint8_t *payload, att_hdr_t *send_hdr, uint8_t **send_ptr) {
+int process_msg1(sgx_enclave_id_t eid, uint8_t *payload, att_hdr_t *send_hdr,
+                 uint8_t **send_ptr) {
     int ret = -1;
+    sgx_epid_group_id_t extended_epid_group_id = {0};
+    uint8_t *pubkey_buf;
+    ias_att_report_t att_report;
+    att_msg1_t *message1 = (att_msg1_t *)(payload);
+    att_msg2_t *message2;
+    sgx_quote_t *quote;
 
+    /* the default response */
     send_hdr->tlen = 0;
-    send_hdr->type = ATT_MSG2;
+    send_hdr->type = ATT_ERR;
     *send_ptr = NULL;
 
+    ret = sgx_get_extended_epid_group_id((uint32_t *)&extended_epid_group_id);
+    if (ret != SGX_SUCCESS) {
+        log_error("sgx_get_extended_epid_group_id() (ret=%#x)", ret);
+        goto out;
+    }
+
+    pubkey_buf = (uint8_t *)(((uint8_t *)message1) + sizeof(att_msg1_t));
+    quote = (sgx_quote_t *)(pubkey_buf + pubkey_len);
+    /* verify the signature */
+    if ((ret = ias_verify_attestation_evidence(quote, NULL, &att_report))) {
+        log_error("ias_verify_attestation_evidence() ret=%d", ret);
+        goto out;
+    }
+
+    /* call the enclave to give the result */
+    send_hdr->type = ATT_MSG2;
+
+    /* call the enclave */
+    message2 = (att_msg2_t *)calloc(1, sizeof(att_msg2_t));
+    ecall_generate_m2(eid, &ret, pubkey_buf, message1->pk_len, message2);
+    if (ret) {
+        log_error("ecall_generate_m2() ret=%d", ret);
+        goto out;
+    }
+
+    *send_ptr = (uint8_t *)message2;
+    send_hdr->tlen = sizeof(att_msg2_t);
+    send_hdr->type = ATT_MSG2;
+
     ret = 0;
+out:
     return ret;
 }
 
-int process_message(att_hdr_t *hdr, uint8_t *payload, att_hdr_t *send_hdr,
-                    uint8_t **send_ptr) {
+int process_message(sgx_enclave_id_t eid, att_hdr_t *hdr, uint8_t *payload,
+                    att_hdr_t *send_hdr, uint8_t **send_ptr) {
     int ret = -1;
 
     switch (hdr->type) {
         case ATT_MSG1:
-            return process_msg1(payload, send_hdr, send_ptr);
+            return process_msg1(eid, payload, send_hdr, send_ptr);
     }
 
     ret = 0;

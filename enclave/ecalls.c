@@ -36,7 +36,7 @@ static int generate_public_private_keypair() {
     return ret;
 }
 
-static uint8_t buf[16000];
+static uint8_t buf[512];
 int ecall_create_report(sgx_target_info_t *qe_info, sgx_report_t *report,
                         att_msg1_t *p_msg1, uint8_t *pubkey, int p_cap) {
     int ret = 0, nc_off = 0, len = 0, l, pk_len;
@@ -59,7 +59,7 @@ int ecall_create_report(sgx_target_info_t *qe_info, sgx_report_t *report,
     if (p_cap < pk_len) {
         return -4;
     }
-    
+
     /* lets start setting user-defined data */
     msg1.pk_len = pk_len;
 
@@ -103,6 +103,41 @@ int ecall_create_report(sgx_target_info_t *qe_info, sgx_report_t *report,
     memcpy(report, &_report, sizeof(sgx_report_t));
     memcpy(p_msg1, &msg1, sizeof(att_msg1_t));
     return 0;
+}
+
+int ecall_generate_m2(uint8_t *pubkey, size_t pubkey_len, att_msg2_t *p_msg2) {
+    int ret = -1;
+    size_t olen;
+    ekey_t ekey;
+    att_msg2_t msg2 = {0};
+    mbedtls_pk_context _k, *pk = &_k;
+    mbedtls_pk_init(pk);
+
+    /* parse the public key */
+    ret = mbedtls_pk_parse_public_key(pk, pubkey, pubkey_len);
+    if (ret) {
+        return -1;
+    }
+
+    /* generate a random encryption key */
+    sgx_read_rand((void *)&ekey, sizeof(ekey_t));
+
+    /* encrypt into the buffer */
+    ret = mbedtls_pk_encrypt(pk, (uint8_t *)&ekey, sizeof(ekey_t),
+                             (uint8_t *)&msg2.pl_ciphertext, &olen,
+                             sizeof(msg2.pl_ciphertext), NULL, NULL);
+    if (ret) {
+        return -2;
+    }
+
+    /* copy the buffer out */
+    memcpy(p_msg2, &msg2, olen);
+
+    ret = 0;
+out:
+    mbedtls_pk_free(pk);
+    mbedtls_pk_free(pk);
+    return ret;
 }
 
 int ecall_init_enclave(secret_t *ptr) {
